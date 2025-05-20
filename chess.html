@@ -2,20 +2,50 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Instant Chess Advisor</title>
-  <link rel="stylesheet" href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+  <title>Instant Chess Analysis</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
   <style>
-    body { font-family: sans-serif; }
-    #board { margin-top: 20px; }
+    body { font-family: sans-serif; margin: 20px; }
+    #board { float: left; }
+    #info { margin-left: 440px; }
+    #eval { font-size: 1.5em; display: inline-block;
+            background: #1abc9c; color: white;
+            padding: 5px 10px; border-radius: 4px; }
+    #controls button { margin: 5px; }
+    #lines { max-height: 200px; overflow-y: auto;
+             border: 1px solid #ddd; padding: 10px;
+             margin-top: 10px; background: #f9f9f9; }
+    #lines div { margin-bottom: 5px; }
   </style>
 </head>
 <body>
-  <h2 style="text-align:center;">Instant Chess Advisor</h2>
-  <div id="board" style="width:400px; margin:auto;"></div>
-  <div style="text-align:center; margin-top:15px;">
-    <button id="getBest">Get Best Move</button><br>
-    <small>FEN: <span id="fen">start position</span></small><br>
-    <strong>Engine says:</strong> <span id="bestmove">–</span>
+
+  <h2>Instant Chess Analysis</h2>
+  <div id="board" style="width: 400px;"></div>
+
+  <div id="info">
+    <div>
+      <span id="eval">+0.00</span>
+      <small id="depth">depth 0</small>
+    </div>
+
+    <div id="lines">
+      <!-- engine lines will appear here -->
+    </div>
+
+    <div id="controls">
+      <button id="importPGN">Import PGN</button>
+      <button id="importFEN">Import FEN</button>
+      <button id="setUp">Set Up Board</button>
+      <button id="playEngine">Play vs Engine</button>
+    </div>
+
+    <div style="margin-top:10px;">
+      <strong>FEN:</strong>
+      <input type="text" id="fenInput" style="width: 300px;">
+      <button id="applyFEN">Apply</button>
+    </div>
   </div>
 
   <script src="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
@@ -27,26 +57,118 @@
       draggable: true,
       position: 'start',
       onDrop: (src, tgt) => {
-        const m = game.move({ from: src, to: tgt, promotion: 'q' });
-        if (!m) return 'snapback';
-        document.getElementById('fen').textContent = game.fen();
+        const move = game.move({ from: src, to: tgt, promotion: 'q' });
+        if (!move) return 'snapback';
+        updateFEN();
+        analysePosition();
       },
       onSnapEnd: () => board.position(game.fen())
     });
 
+    // Engine setup
     const engine = new Worker('stockfish.js');
-    engine.onmessage = e => {
-      const line = e.data || e;
-      if (line.startsWith('bestmove')) {
-        document.getElementById('bestmove').textContent = line.split(' ')[1];
+    engine.postMessage('uci');
+    let analysisLines = [];
+
+    engine.onmessage = event => {
+      const line = event.data || event;
+      if (line.startsWith('info')) {
+        // parse eval, depth, and PV
+        const data = {};
+        line.split(' ').forEach((tok, i, arr) => {
+          if (tok==='depth') data.depth = arr[i+1];
+          if (tok==='cp')    data.cp    = arr[i+1];
+          if (tok==='mate')  data.mate  = arr[i+1];
+          if (tok==='pv')    data.pv    = arr.slice(i+1).join(' ');
+        });
+        if (data.depth) {
+          document.getElementById('depth').textContent = `depth ${data.depth}`;
+          let evalText = data.mate
+            ? `#${data.mate}`
+            : (data.cp/100).toFixed(2);
+          document.getElementById('eval').textContent =
+            (evalText > 0 ? '+' : '') + evalText;
+          // store top lines
+          if (data.pv) {
+            analysisLines.push({
+              depth: parseInt(data.depth),
+              text: data.pv
+            });
+            // keep only highest-depth entries
+            analysisLines = analysisLines
+              .sort((a,b)=>b.depth-a.depth)
+              .slice(0,3);
+            renderLines();
+          }
+        }
       }
     };
 
-    document.getElementById('getBest').onclick = () => {
-      const fen = game.fen();
-      engine.postMessage('uci');
-      engine.postMessage(`position fen ${fen}`);
-      engine.postMessage('go depth 17');
+    function renderLines() {
+      const container = document.getElementById('lines');
+      container.innerHTML = '';
+      analysisLines.forEach(l => {
+        const div = document.createElement('div');
+        div.textContent = `d${l.depth}: ${l.text}`;
+        container.appendChild(div);
+      });
+    }
+
+    function analysePosition() {
+      analysisLines = [];
+      document.getElementById('lines').innerHTML = '';
+      engine.postMessage(`position fen ${game.fen()}`);
+      engine.postMessage('go depth 20');
+    }
+
+    function updateFEN() {
+      document.getElementById('fenInput').value = game.fen();
+    }
+
+    // Initial fen display and analysis
+    updateFEN();
+    analysePosition();
+
+    // Control buttons
+    document.getElementById('applyFEN').onclick = () => {
+      const fen = document.getElementById('fenInput').value;
+      if (game.load(fen)) {
+        board.position(fen);
+        analysePosition();
+      } else {
+        alert('Invalid FEN');
+      }
+    };
+
+    document.getElementById('setUp').onclick = () => {
+      board.start(true);
+      game.reset();
+      updateFEN();
+      analysePosition();
+    };
+
+    document.getElementById('importFEN').onclick = () => {
+      const fen = prompt('Paste your FEN string:');
+      if (fen) {
+        document.getElementById('fenInput').value = fen;
+        document.getElementById('applyFEN').click();
+      }
+    };
+
+    document.getElementById('importPGN').onclick = () => {
+      const pgn = prompt('Paste your PGN here:');
+      if (pgn && game.load_pgn(pgn)) {
+        board.position(game.fen());
+        updateFEN();
+        analysePosition();
+      } else {
+        alert('Invalid PGN');
+      }
+    };
+
+    document.getElementById('playEngine').onclick = () => {
+      window.open('https://lichess.org/analysis/standard/'+encodeURIComponent(game.fen()),
+                  '_blank');
     };
   </script>
 </body>
