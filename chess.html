@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Instant Chess Advisor</title>
+  <link rel="stylesheet" href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+  <style>
+    body { font-family: sans-serif; }
+    #board { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h2 style="text-align:center;">Instant Chess Advisor</h2>
+  <div id="board" style="width:400px; margin:auto;"></div>
+  <div style="text-align:center; margin-top:15px;">
+    <button id="getBest">Get Best Move</button><br>
+    <small>FEN: <span id="fen">start position</span></small><br>
+    <strong>Engine says:</strong> <span id="bestmove">–</span>
+  </div>
+
+  <script src="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/1.0.0/chess.min.js"></script>
+  <script src="https://unpkg.com/stockfish@11.0.0/dist/stockfish.js"></script>
+  <script>
+    const game = new Chess();
+    const board = Chessboard('board', {
+      draggable: true,
+      position: 'start',
+      onDrop: (src, tgt) => {
+        const m = game.move({ from: src, to: tgt, promotion: 'q' });
+        if (!m) return 'snapback';
+        document.getElementById('fen').textContent = game.fen();
+      },
+      onSnapEnd: () => board.position(game.fen())
+    });
+
+    const engine = new Worker('stockfish.js');
+    engine.onmessage = e => {
+      const line = e.data || e;
+      if (line.startsWith('bestmove')) {
+        document.getElementById('bestmove').textContent = line.split(' ')[1];
+      }
+    };
+
+    document.getElementById('getBest').onclick = () => {
+      const fen = game.fen();
+      engine.postMessage('uci');
+      engine.postMessage(`position fen ${fen}`);
+      engine.postMessage('go depth 17');
+    };
+  </script>
+</body>
+</html>
